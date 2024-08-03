@@ -46,7 +46,7 @@ https://cdn.discordapp.com/attachments/765988405791555635/1264939650561081464/04
 
   await client.login(process.env.DISCORD_TOKEN);
 }
-sendMessage();
+
 schedule.scheduleJob("0 10 * * *", () => {
   sendMessage();
 });
