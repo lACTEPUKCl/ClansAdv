@@ -72,12 +72,30 @@ const message2 = `**Игровое сообщество 5.45 проводит н
 https://discord.gg/Q4Rsa8zKQ3
 https://cdn.discordapp.com/attachments/1135615323563905086/1269716491801202729/IMG_8181.PNG?ex=66b11321&is=66afc1a1&hm=2fb3eb01a913114b9143e35703aeb99d5c4af7379bd51a69b78bdcd456c154aa&`;
 
-// Schedule the first message at 10:00 AM
+const message3 = `**Ахтунг! Клан KRIEG проводит набор новых кандидатов.**
+  Мы - команда опытных игроков. В нашем клане приветствуются как знатоки сквада, так и новые игроки. 
+ **От нас:**
+- Совместная игра. Основное время 18-22 МСК
+- Обучение новых игроков
+- Приятная атмосфера 
+- Клановый VIP для активных игроков
+ **От вас же мы ждем:**
+- Хорошее настроение
+- Адекватность и желание развиваться вместе с кланом
+- Возраст 16+ (Опционально) 
+
+**Если после прочтения у вас появилось желание присоединиться к нам - добро пожаловать!**
+https://discord.com/invite/XqrGftCUks
+https://cdn.discordapp.com/attachments/1224234669034442775/1274384096784810075/00000.png?ex=66c20e2d&is=66c0bcad&hm=2a9389869cb32e165212ab056b121c97b7586e4d564b8911b0fe3bf4af4d48ab&`;
+
 schedule.scheduleJob("0 10 * * *", () => {
   sendMessage(message1);
 });
 
-// Schedule the second message at 5:00 PM
 schedule.scheduleJob("0 17 * * *", () => {
   sendMessage(message2);
+});
+
+schedule.scheduleJob("0 13 * * *", () => {
+  sendMessage(message3);
 });
