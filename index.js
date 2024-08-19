@@ -69,7 +69,7 @@ const message2 = `**Игровое сообщество 5.45 проводит н
 
 **Если вы заинтересованы, рады будем ответить на ваши вопросы**
 
-https://discord.gg/Q4Rsa8zKQ3
+https://discord.com/invite/sD8u4u5eBe
 https://cdn.discordapp.com/attachments/1135615323563905086/1269716491801202729/IMG_8181.PNG?ex=66b11321&is=66afc1a1&hm=2fb3eb01a913114b9143e35703aeb99d5c4af7379bd51a69b78bdcd456c154aa&`;
 
 const message3 = `**Ахтунг! Клан KRIEG проводит набор новых кандидатов.**
