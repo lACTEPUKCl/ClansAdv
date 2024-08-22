@@ -90,10 +90,6 @@ const message3 = `**Ахтунг! Клан KRIEG проводит набор н�
 https://discord.com/invite/XqrGftCUks
 https://cdn.discordapp.com/attachments/1224234669034442775/1274384096784810075/00000.png?ex=66c20e2d&is=66c0bcad&hm=2a9389869cb32e165212ab056b121c97b7586e4d564b8911b0fe3bf4af4d48ab&`;
 
-schedule.scheduleJob("0 10 * * *", () => {
-  sendMessage(message1);
-});
-
 schedule.scheduleJob("0 17 * * *", () => {
   sendMessage(message2);
 });
