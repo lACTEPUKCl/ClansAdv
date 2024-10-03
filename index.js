@@ -93,7 +93,3 @@ https://cdn.discordapp.com/attachments/1224234669034442775/1274384096784810075/0
 schedule.scheduleJob("0 17 * * *", () => {
   sendMessage(message2);
 });
-
-schedule.scheduleJob("0 13 * * *", () => {
-  sendMessage(message3);
-});
