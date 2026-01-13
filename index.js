@@ -1,7 +1,22 @@
 import { Client, GatewayIntentBits } from "discord.js";
 import schedule from "node-schedule";
 import { config } from "dotenv";
+import { HttpsProxyAgent } from "https-proxy-agent";
+import { ProxyAgent, setGlobalDispatcher } from "undici";
+
 config();
+
+const proxyUrl = process.env.DISCORD_PROXY_URL;
+let wsProxyAgent = null;
+
+if (proxyUrl) {
+  console.log("[BOT] Using Discord proxy:", proxyUrl);
+
+  const restProxy = new ProxyAgent(proxyUrl);
+  setGlobalDispatcher(restProxy);
+
+  wsProxyAgent = new HttpsProxyAgent(proxyUrl);
+}
 
 async function sendMessage(content) {
   const client = new Client({
@@ -9,20 +24,29 @@ async function sendMessage(content) {
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
     ],
+    ...(wsProxyAgent ? { ws: { agent: wsProxyAgent } } : {}),
   });
 
   client.once("ready", async () => {
-    console.log(`Logged in as ${client.user.tag}!`);
+    try {
+      console.log(`Logged in as ${client.user.tag}!`);
 
-    const channel = await client.channels.fetch(process.env.CHANNEL_ID);
-    if (channel) {
+      const channel = await client.channels.fetch(process.env.CHANNEL_ID);
+      if (!channel) {
+        console.error("Канал не найден.");
+        return;
+      }
+
       await channel.send(content);
-    } else {
-      console.error("Канал не найден.");
+    } catch (e) {
+      console.error("[SEND] Ошибка отправки:", e);
+    } finally {
+      client.destroy();
     }
-
-    client.destroy();
   });
+
+  client.on("error", (err) => console.error("[CLIENT ERROR]", err));
+  client.on("shardError", (err) => console.error("[SHARD ERROR]", err));
 
   await client.login(process.env.DISCORD_TOKEN);
 }
