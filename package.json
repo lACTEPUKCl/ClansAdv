@@ -10,8 +10,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "discord.js": "^14.15.2",
-    "dotenv": "^16.4.5",
-    "node-schedule": "^2.1.1"
+    "discord.js": "^14.25.1",
+    "dotenv": "^16.6.1",
+    "https-proxy-agent": "^7.0.6",
+    "node-schedule": "^2.1.1",
+    "undici": "^7.18.2"
   }
 }
