@@ -1,28 +1,60 @@
 import { Client, GatewayIntentBits } from "discord.js";
 import schedule from "node-schedule";
 import { config } from "dotenv";
+import { HttpsProxyAgent } from "https-proxy-agent";
+import { ProxyAgent, setGlobalDispatcher } from "undici";
+
 config();
 
+// --------------------
+// Proxy (как во 2-м боте)
+// --------------------
+const proxyUrl = process.env.DISCORD_PROXY_URL;
+let wsProxyAgent = null;
+
+if (proxyUrl) {
+  console.log("[BOT] Using Discord proxy:", proxyUrl);
+
+  // REST / fetch / undici
+  const restProxy = new ProxyAgent(proxyUrl);
+  setGlobalDispatcher(restProxy);
+
+  // WS (Gateway)
+  wsProxyAgent = new HttpsProxyAgent(proxyUrl);
+}
+
+// --------------------
+// Sender
+// --------------------
 async function sendMessage(content) {
   const client = new Client({
     intents: [
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
     ],
+    ...(wsProxyAgent ? { ws: { agent: wsProxyAgent } } : {}),
   });
 
   client.once("ready", async () => {
-    console.log(`Logged in as ${client.user.tag}!`);
+    try {
+      console.log(`Logged in as ${client.user.tag}!`);
 
-    const channel = await client.channels.fetch(process.env.CHANNEL_ID);
-    if (channel) {
+      const channel = await client.channels.fetch(process.env.CHANNEL_ID);
+      if (!channel) {
+        console.error("Канал не найден.");
+        return;
+      }
+
       await channel.send(content);
-    } else {
-      console.error("Канал не найден.");
+    } catch (e) {
+      console.error("[SEND] Ошибка отправки:", e);
+    } finally {
+      client.destroy();
     }
-
-    client.destroy();
   });
+
+  client.on("error", (err) => console.error("[CLIENT ERROR]", err));
+  client.on("shardError", (err) => console.error("[SHARD ERROR]", err));
 
   await client.login(process.env.DISCORD_TOKEN);
 }
@@ -46,7 +78,7 @@ const message1 = `Сообщество **SKAT** готово рассмотре�
 Прайм-тайм с 18:00 до 22:00 по МСК;
 
 **[Также активно играем в различные проекты]**
-https://discord.gg/ndm4fPFTpB
+https://discord.com/invite/VTcT8xwpGR
 https://cdn.discordapp.com/attachments/765988405791555635/1264939650561081464/0423d4beee19884c.png?ex=66af845a&is=66ae32da&hm=194e223294473a128cbb4fc13d1d1219a69ecec69f189d57fc91780afba62e34&`;
 
 const message2 = `**Игровое сообщество 5.45 проводит набор кандидатов на вступление.**
@@ -69,33 +101,52 @@ const message2 = `**Игровое сообщество 5.45 проводит н
 
 **Если вы заинтересованы, рады будем ответить на ваши вопросы**
 
-https://discord.gg/Q4Rsa8zKQ3
+https://discord.com/invite/sD8u4u5eBe
 https://cdn.discordapp.com/attachments/1135615323563905086/1269716491801202729/IMG_8181.PNG?ex=66b11321&is=66afc1a1&hm=2fb3eb01a913114b9143e35703aeb99d5c4af7379bd51a69b78bdcd456c154aa&`;
 
 const message3 = `**Ахтунг! Клан KRIEG проводит набор новых кандидатов.**
-  Мы - команда опытных игроков. В нашем клане приветствуются как знатоки сквада, так и новые игроки. 
+  Мы - команда опытных игроков. В нашем клане приветствуются как знатоки сквада, так и новые игроки.
+  
  **От нас:**
 - Совместная игра. Основное время 18-22 МСК
 - Обучение новых игроков
 - Приятная атмосфера 
 - Клановый VIP для активных игроков
+
  **От вас же мы ждем:**
 - Хорошее настроение
 - Адекватность и желание развиваться вместе с кланом
 - Возраст 16+ (Опционально) 
 
 **Если после прочтения у вас появилось желание присоединиться к нам - добро пожаловать!**
-https://discord.com/invite/XqrGftCUks
+https://discord.gg/WPbaUj5ncp
 https://cdn.discordapp.com/attachments/1224234669034442775/1274384096784810075/00000.png?ex=66c20e2d&is=66c0bcad&hm=2a9389869cb32e165212ab056b121c97b7586e4d564b8911b0fe3bf4af4d48ab&`;
 
-schedule.scheduleJob("0 10 * * *", () => {
-  sendMessage(message1);
-});
+const message4 = `'IMPERA Corp.' – это клан, который не только ориентирован на веселую и фановую игру вместе, но и стремится к серьёзным соревнованиям (Турниры, Клановые войны, Межсерверные баталии, Ивенты).
+
+Основной состав нашего клана – опытные игроки 18+ готовые делиться своим опытом с игроками любого уровня.
+
+Главное для нас - стремление к совершенствованию, к победе и формированию вокруг себя сплочённого и приятного коллектива.
+  
+ **Ожидаем от вас:**
+- Активного участия в жизни клана
+- Желания развиваться и перенимать опыт старших товарищей
+- Возраст 18+ (возможны исключения)
+- Адекватное общение
+
+ **Взамен предлагаем:**
+- VIP статус для активных игроков
+- Незабываемый игровой опыт
+- Разнообразие в выборе направлений
+
+**Основной 'прайм тайм' клана с 19:00 до 23:00 по МСК.**
+https://discord.gg/HHNC8DWaaW
+`;
 
 schedule.scheduleJob("0 17 * * *", () => {
   sendMessage(message2);
 });
 
 schedule.scheduleJob("0 13 * * *", () => {
-  sendMessage(message3);
+  sendMessage(message4);
 });
