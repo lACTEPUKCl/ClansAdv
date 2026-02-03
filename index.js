@@ -170,3 +170,4 @@ schedule.scheduleJob({ rule: "0 13 * * *", tz: "Europe/Moscow" }, () =>
 schedule.scheduleJob({ rule: "0 1 * * *", tz: "Europe/Moscow" }, () =>
   sendMessage(message5),
 );
+console.log("[BOT] Scheduled jobs set up.");
