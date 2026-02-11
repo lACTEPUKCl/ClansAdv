@@ -165,6 +165,16 @@ const message5 = `***Искал опытный коллектив, где цен
 
 https://discord.gg/oco-team`;
 
+const message6 = `Приветствую, мы **Team North** 
+
+За годы компета, из небольшого коллектива мы стали сплоченной командой, где опыт ветеранов и рвение молодых стали ключом к победе. Наш путь начался с участия в [ISST](https://play.toornament.com/en_US/tournaments/1780292832328425472/matches/) в 2018 году, с тех пор состав команды полностью менялся, и не раз, но наши стремления оставались прежними. Через победы и неудачи, поколение за поколением, мы не переставали быть сообществом людей, которые любят соревнования.
+
+Наш девиз: **«Билет в компет»**. Мы принимаем игроков любого уровня, воспитывая таланты со всего мира, главное, чтоб они умели говорить по-русски и соблюдали наш устав.
+
+Мы ценим тех, кто стремится к командной игре, учится на ошибках и адаптируется несмотря на трудности.
+
+**Твой билет в компет -** https://discord.gg/FsHY8vVD | https://teamnorth.ru/`;
+
 schedule.scheduleJob({ rule: "0 12 * * *", tz: "Europe/Moscow" }, () =>
   sendMessage(message1),
 );
@@ -183,5 +193,9 @@ schedule.scheduleJob({ rule: "0 13 * * *", tz: "Europe/Moscow" }, () =>
 
 schedule.scheduleJob({ rule: "0 1 * * *", tz: "Europe/Moscow" }, () =>
   sendMessage(message5),
+);
+
+schedule.scheduleJob({ rule: "0 18 * * *", tz: "Europe/Moscow" }, () =>
+  sendMessage(message6),
 );
 console.log("[BOT] Scheduled jobs set up.");
