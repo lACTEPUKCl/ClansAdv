@@ -3,54 +3,220 @@ import schedule from "node-schedule";
 import { config } from "dotenv";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { ProxyAgent, setGlobalDispatcher } from "undici";
+import { MongoClient } from "mongodb";
 
 config();
 
+// ─────────────────────────────────────────────
+//  Proxy (REST + WebSocket) — как раньше
+// ─────────────────────────────────────────────
 const proxyUrl = process.env.DISCORD_PROXY_URL;
 let wsProxyAgent = null;
 
 if (proxyUrl) {
   console.log("[BOT] Using Discord proxy:", proxyUrl);
-
   const restProxy = new ProxyAgent(proxyUrl);
   setGlobalDispatcher(restProxy);
-
   wsProxyAgent = new HttpsProxyAgent(proxyUrl);
 }
 
-async function sendMessage(payload) {
-  const client = new Client({
-    intents: [
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.MessageContent,
-    ],
-    ...(wsProxyAgent ? { ws: { agent: wsProxyAgent } } : {}),
-  });
+// ─────────────────────────────────────────────
+//  MongoDB — общая БД с сайтом rns-site
+//  Сайт пишет в коллекцию clan_ad_posts (см. backend ClanAdPost),
+//  бот читает одобренные посты и публикует их по расписанию.
+// ─────────────────────────────────────────────
+const MONGO_URI = process.env.MONGO_URI || "";
+const MONGO_DB = process.env.MONGO_DB || "ticketBotDB";
+const AD_COLLECTION = "clan_ad_posts";
 
-  client.once("ready", async () => {
-    try {
-      console.log(`Logged in as ${client.user.tag}!`);
+let mongoClient = null;
+let adCollection = null;
 
-      const channel = await client.channels.fetch(process.env.CHANNEL_ID);
-      if (!channel) {
-        console.error("Канал не найден.");
-        return;
+async function initMongo() {
+  if (!MONGO_URI) {
+    console.warn("[BOT] MONGO_URI не задан — динамические посты кланов отключены");
+    return;
+  }
+  try {
+    mongoClient = new MongoClient(MONGO_URI, { serverSelectionTimeoutMS: 5000 });
+    await mongoClient.connect();
+    adCollection = mongoClient.db(MONGO_DB).collection(AD_COLLECTION);
+    console.log(`[BOT] MongoDB подключена (db=${MONGO_DB}, collection=${AD_COLLECTION})`);
+  } catch (e) {
+    console.error("[BOT] Ошибка подключения к MongoDB:", e.message);
+    mongoClient = null;
+    adCollection = null;
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Канонический JSON -> payload для channel.send()
+//  (зеркало backend/src/services/discordAdPayload.js → buildDiscordPayload)
+// ─────────────────────────────────────────────
+const BUTTONS_PER_ROW = 5;
+
+function buildDiscordPayload(canonical) {
+  if (!canonical || typeof canonical !== "object") return null;
+  const msg = {};
+
+  if (canonical.content) msg.content = canonical.content;
+  if (canonical.imageUrl) msg.files = [canonical.imageUrl];
+
+  if (Array.isArray(canonical.embeds) && canonical.embeds.length) {
+    msg.embeds = canonical.embeds.map((e) => {
+      const out = {};
+      if (e.title) out.title = e.title;
+      if (e.description) out.description = e.description;
+      if (e.url) out.url = e.url;
+      if (typeof e.color === "number") out.color = e.color;
+      if (e.timestamp) out.timestamp = e.timestamp;
+      if (e.author) {
+        out.author = { name: e.author.name };
+        if (e.author.url) out.author.url = e.author.url;
+        if (e.author.iconUrl) out.author.icon_url = e.author.iconUrl;
       }
+      if (e.thumbnailUrl) out.thumbnail = { url: e.thumbnailUrl };
+      if (e.imageUrl) out.image = { url: e.imageUrl };
+      if (e.footer) {
+        out.footer = { text: e.footer.text };
+        if (e.footer.iconUrl) out.footer.icon_url = e.footer.iconUrl;
+      }
+      if (Array.isArray(e.fields) && e.fields.length) {
+        out.fields = e.fields.map((f) => ({
+          name: f.name,
+          value: f.value,
+          inline: !!f.inline,
+        }));
+      }
+      return out;
+    });
+  }
 
-      const resolved = typeof payload === "function" ? payload() : payload;
-      await channel.send(resolved);
-    } catch (e) {
-      console.error("[SEND] Ошибка отправки:", e);
-    } finally {
-      client.destroy();
+  if (Array.isArray(canonical.buttons) && canonical.buttons.length) {
+    const rows = [];
+    for (let i = 0; i < canonical.buttons.length; i += BUTTONS_PER_ROW) {
+      const chunk = canonical.buttons.slice(i, i + BUTTONS_PER_ROW);
+      rows.push({
+        type: 1,
+        components: chunk.map((b) => ({ type: 2, style: 5, label: b.label, url: b.url })),
+      });
+    }
+    msg.components = rows;
+  }
+
+  if (!msg.content && !msg.embeds && !msg.components && !msg.files) return null;
+  return msg;
+}
+
+// ─────────────────────────────────────────────
+//  Текущий час по Москве (0..23)
+// ─────────────────────────────────────────────
+function moscowHour() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Moscow",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  let h = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+  if (h === 24) h = 0;
+  return h;
+}
+
+// ─────────────────────────────────────────────
+//  Логин одним клиентом, выполнить fn(client, channel), отключиться
+// ─────────────────────────────────────────────
+function withClient(fn) {
+  return new Promise((resolve) => {
+    const client = new Client({
+      intents: [GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+      ...(wsProxyAgent ? { ws: { agent: wsProxyAgent } } : {}),
+    });
+
+    client.once("ready", async () => {
+      try {
+        console.log(`Logged in as ${client.user.tag}!`);
+        const channel = await client.channels.fetch(process.env.CHANNEL_ID);
+        if (!channel) {
+          console.error("Канал не найден.");
+        } else {
+          await fn(client, channel);
+        }
+      } catch (e) {
+        console.error("[SEND] Ошибка:", e);
+      } finally {
+        client.destroy();
+        resolve();
+      }
+    });
+
+    client.on("error", (err) => console.error("[CLIENT ERROR]", err));
+    client.on("shardError", (err) => console.error("[SHARD ERROR]", err));
+    client.login(process.env.DISCORD_TOKEN);
+  });
+}
+
+// Отправить одно (legacy) сообщение
+async function sendMessage(payload) {
+  await withClient(async (client, channel) => {
+    const resolved = typeof payload === "function" ? payload() : payload;
+    await channel.send(resolved);
+  });
+}
+
+// ─────────────────────────────────────────────
+//  Динамические посты кланов: публикуем все одобренные на текущий час
+// ─────────────────────────────────────────────
+async function sendDuePosts() {
+  if (!adCollection) return;
+  const hour = moscowHour();
+
+  let docs = [];
+  try {
+    docs = await adCollection
+      .find({
+        enabled: true,
+        status: "approved",
+        scheduleHour: hour,
+        livePayload: { $ne: null },
+      })
+      .toArray();
+  } catch (e) {
+    console.error("[BOT] Ошибка чтения постов из Mongo:", e.message);
+    return;
+  }
+
+  if (!docs.length) {
+    console.log(`[BOT] ${String(hour).padStart(2, "0")}:00 — постов кланов нет`);
+    return;
+  }
+
+  console.log(`[BOT] ${String(hour).padStart(2, "0")}:00 — публикуем ${docs.length} пост(ов)`);
+
+  await withClient(async (client, channel) => {
+    for (const doc of docs) {
+      const payload = buildDiscordPayload(doc.livePayload);
+      if (!payload) {
+        console.warn(`[BOT] Пост [${doc.clanTag}] пустой — пропуск`);
+        continue;
+      }
+      try {
+        await channel.send(payload);
+        await adCollection.updateOne(
+          { _id: doc._id },
+          { $set: { lastPostedAt: new Date() } },
+        );
+        console.log(`[BOT] Опубликован пост клана [${doc.clanTag}]`);
+      } catch (e) {
+        console.error(`[BOT] Ошибка публикации [${doc.clanTag}]:`, e.message);
+      }
     }
   });
-
-  client.on("error", (err) => console.error("[CLIENT ERROR]", err));
-  client.on("shardError", (err) => console.error("[SHARD ERROR]", err));
-
-  await client.login(process.env.DISCORD_TOKEN);
 }
+
+// ═════════════════════════════════════════════
+//  LEGACY: статические посты (можно отключить LEGACY_POSTS=false)
+// ═════════════════════════════════════════════
+const LEGACY_POSTS = process.env.LEGACY_POSTS !== "false";
 
 const message1 = `**[UDT](https://discord.gg/SmNbEh5k7H)**— клан по Squad для игроков, которые ценят результат и понимают ценность командной игры.
 
@@ -100,11 +266,6 @@ const message3 = `**📌 『MD』** - это проявление уважени
 > ⏳Игровой стаж: от 200 часов в игре ( допускаются исключения).
 > •Знание основ и принципов игры Squad.
 > •Наличие микрофона для обеспечения эффективного командного взаимодействия.
-> 💡Возраст: от 18 лет (допускаются исключения).
-> 💪Устойчивость к стрессу и умение сохранять спокойствие в сложных ситуациях.
-> ⏳Игровой стаж: от 200 часов в игре (допускаются исключения).
-> 📚Знание основ и принципов игры Squad.
-> 🎙️Наличие микрофона для обеспечения эффективного командного взаимодействия.
 
 **📝Взамен предлагаем:**
 
@@ -136,7 +297,7 @@ const message4 = {
 
 За пределами матча у нас **живые люди**. **Бункер**, **Gartic**, **Jackbox**, **личные встречи**, и своя **атмосфера** которую сложно описать но легко почувствовать.
 
-Возраст **18+** с возможными исключениями, **микрофон**, **адекватность** — **это минимум**.  
+Возраст **18+** с возможными исключениями, **микрофон**, **адекватность** — **это минимум**.
 **Желание расти** и быть **частью команды** — **это главное**.
 
 **Прайм-тайм: 19:00 – 00:00 МСК.**`,
@@ -270,35 +431,34 @@ const message8 = {
   ],
 };
 
-schedule.scheduleJob({ rule: "0 12 * * *", tz: "Europe/Moscow" }, () =>
-  sendMessage(message1),
-);
+// ─────────────────────────────────────────────
+//  Запуск
+// ─────────────────────────────────────────────
+await initMongo();
 
-schedule.scheduleJob({ rule: "0 19 * * *", tz: "Europe/Moscow" }, () =>
-  sendMessage(message3),
-);
+if (LEGACY_POSTS) {
+  schedule.scheduleJob({ rule: "0 12 * * *", tz: "Europe/Moscow" }, () => sendMessage(message1));
+  schedule.scheduleJob({ rule: "0 19 * * *", tz: "Europe/Moscow" }, () => sendMessage(message3));
+  schedule.scheduleJob({ rule: "0 17 * * *", tz: "Europe/Moscow" }, () => sendMessage(message2));
+  schedule.scheduleJob({ rule: "0 13 * * *", tz: "Europe/Moscow" }, () => sendMessage(message4));
+  schedule.scheduleJob({ rule: "0 1 * * *", tz: "Europe/Moscow" }, () => sendMessage(message5));
+  schedule.scheduleJob({ rule: "0 18 * * *", tz: "Europe/Moscow" }, () => sendMessage(message6));
+  schedule.scheduleJob({ rule: "0 20 * * *", tz: "Europe/Moscow" }, () => sendMessage(message7));
+  schedule.scheduleJob({ rule: "0 16 * * *", tz: "Europe/Moscow" }, () => sendMessage(message8));
+  console.log("[BOT] Legacy-расписание включено.");
+} else {
+  console.log("[BOT] Legacy-расписание отключено (LEGACY_POSTS=false).");
+}
 
-schedule.scheduleJob({ rule: "0 17 * * *", tz: "Europe/Moscow" }, () =>
-  sendMessage(message2),
-);
+// Динамические посты кланов — каждый час в :00 по МСК
+schedule.scheduleJob({ rule: "0 * * * *", tz: "Europe/Moscow" }, () => sendDuePosts());
 
-schedule.scheduleJob({ rule: "0 13 * * *", tz: "Europe/Moscow" }, () =>
-  sendMessage(message4),
-);
-
-schedule.scheduleJob({ rule: "0 1 * * *", tz: "Europe/Moscow" }, () =>
-  sendMessage(message5),
-);
-
-schedule.scheduleJob({ rule: "0 18 * * *", tz: "Europe/Moscow" }, () =>
-  sendMessage(message6),
-);
-
-schedule.scheduleJob({ rule: "0 20 * * *", tz: "Europe/Moscow" }, () =>
-  sendMessage(message7),
-);
-
-schedule.scheduleJob({ rule: "0 16 * * *", tz: "Europe/Moscow" }, () =>
-  sendMessage(message8),
-);
 console.log("[BOT] Scheduled jobs set up.");
+
+// Корректное закрытие Mongo
+async function shutdown() {
+  try { if (mongoClient) await mongoClient.close(); } catch {}
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

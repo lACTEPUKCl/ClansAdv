@@ -13,6 +13,7 @@
     "discord.js": "^14.25.1",
     "dotenv": "^16.6.1",
     "https-proxy-agent": "^7.0.6",
+    "mongodb": "^6.6.0",
     "node-schedule": "^2.1.1"
   }
 }
