@@ -1,8 +1,7 @@
 import { Client, EmbedBuilder, GatewayIntentBits } from "discord.js";
 import schedule from "node-schedule";
 import { config } from "dotenv";
-import { HttpsProxyAgent } from "https-proxy-agent";
-import { ProxyAgent, setGlobalDispatcher } from "undici";
+import { installDiscordTransport } from './discordTransport.js';
 import { MongoClient } from "mongodb";
 
 config();
@@ -10,15 +9,7 @@ config();
 // ─────────────────────────────────────────────
 //  Proxy (REST + WebSocket) — как раньше
 // ─────────────────────────────────────────────
-const proxyUrl = process.env.DISCORD_PROXY_URL;
-let wsProxyAgent = null;
-
-if (proxyUrl) {
-  console.log("[BOT] Using Discord proxy:", proxyUrl);
-  const restProxy = new ProxyAgent(proxyUrl);
-  setGlobalDispatcher(restProxy);
-  wsProxyAgent = new HttpsProxyAgent(proxyUrl);
-}
+const discordTransport = installDiscordTransport();
 
 // ─────────────────────────────────────────────
 //  MongoDB — общая БД с сайтом rns-site
@@ -128,8 +119,8 @@ function moscowHour() {
 function withClient(fn) {
   return new Promise((resolve) => {
     const client = new Client({
-      intents: [GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
-      ...(wsProxyAgent ? { ws: { agent: wsProxyAgent } } : {}),
+      intents: [GatewayIntentBits.Guilds],
+      ...discordTransport,
     });
 
     client.once("ready", async () => {
